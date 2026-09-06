@@ -102,7 +102,7 @@ function M.open()
   end
 
   local root = project_root()
-  local helper = vim.fn.expand '$HOME/config/scripts/codex-popup'
+  local helper = (vim.g.dotfiles_root or vim.fn.expand '~/config') .. '/scripts/codex-popup'
 
   if vim.env.TMUX and vim.fn.executable 'tmux' == 1 and vim.fn.executable(helper) == 1 then
     local job = vim.fn.jobstart({ helper, root }, { detach = true })

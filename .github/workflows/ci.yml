@@ -30,9 +30,6 @@ jobs:
           tmux -L dotfiles-ci -f /dev/null new-session -d -s config-test \; \
             source-file "$PWD/tmux/.tmux.conf" \; kill-server
 
-      - name: Test install, backup and restore in a temporary HOME
-        run: ./tests/test-installer.sh
-
       - name: Install pinned Neovim
         run: |
           curl -fL --retry 3 \
@@ -42,6 +39,9 @@ jobs:
             sha256sum --check
           tar -xzf /tmp/nvim.tar.gz -C /tmp
           echo '/tmp/nvim-linux-x86_64/bin' >> "$GITHUB_PATH"
+
+      - name: Test prerequisites, idempotence, backup and restore
+        run: ./tests/test-installer.sh
 
       - name: Check Lua formatting
         uses: JohnnyMorganz/stylua-action@479972f01e665acfcba96ada452c36608bdbbb5e # v4.1.0
@@ -56,6 +56,36 @@ jobs:
         run: |
           nvim --headless '+Lazy! sync' +qa
           nvim --headless '+checkhealth kickstart' +qa
+
+  bootstrap:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    container: ubuntu:24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Create an unprivileged user on a minimal system
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends sudo
+          useradd --create-home --shell /bin/bash dotfiles-test
+          printf 'dotfiles-test ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/dotfiles-test
+          chmod 440 /etc/sudoers.d/dotfiles-test
+          cp -a "$GITHUB_WORKSPACE" /home/dotfiles-test/dotfiles
+          chown -R dotfiles-test:dotfiles-test /home/dotfiles-test/dotfiles
+
+      - name: Bootstrap without Zsh or Node preinstalled
+        run: sudo --user=dotfiles-test --set-home bash -lc 'cd ~/dotfiles && ./setup.sh bootstrap'
+
+      - name: Check installed tools and a repeated installation
+        run: |
+          sudo --user=dotfiles-test --set-home bash -lc 'cd ~/dotfiles && ./setup.sh bootstrap && ./setup.sh doctor'
+          sudo --user=dotfiles-test --set-home bash -lc 'cd ~/dotfiles && ./tests/test-installer.sh'
 
   powershell:
     runs-on: ubuntu-latest

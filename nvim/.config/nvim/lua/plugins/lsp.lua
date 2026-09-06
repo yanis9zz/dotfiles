@@ -110,7 +110,15 @@ return {
         },
       }
 
-      local tools = vim.tbl_keys(servers)
+      -- Mason does not distribute clangd for Linux ARM64; bootstrap installs the distro package.
+      local system = vim.uv.os_uname()
+      local system_clangd = system.sysname == 'Linux' and (system.machine == 'aarch64' or system.machine == 'arm64')
+      local tools = {}
+      for name in pairs(servers) do
+        if name ~= 'clangd' or not system_clangd then
+          table.insert(tools, name)
+        end
+      end
       table.insert(tools, 'stylua')
       require('mason-tool-installer').setup { ensure_installed = tools }
       require('mason-lspconfig').setup { automatic_enable = false }

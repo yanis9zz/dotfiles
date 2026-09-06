@@ -4,6 +4,7 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
 fi
 
 export PATH="$HOME/.local/bin:$PATH"
+typeset -g DOTFILES_ROOT="${${(%):-%x}:A:h:h}"
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="powerlevel10k/powerlevel10k"
 zstyle ':omz:update' mode disabled
@@ -27,9 +28,9 @@ nvim() {
   if [[ "${DOTFILES_MAXIMIZE_WINDOWS_TERMINAL:-0}" == 1 &&
         -n "${WT_SESSION:-}" &&
         -x "$(command -v powershell.exe 2>/dev/null)" &&
-        -r "$HOME/config/scripts/windows-terminal-maximize.ps1" ]]; then
+        -r "$DOTFILES_ROOT/scripts/windows-terminal-maximize.ps1" ]]; then
     powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-      -File "$(wslpath -w "$HOME/config/scripts/windows-terminal-maximize.ps1")" >/dev/null 2>&1
+      -File "$(wslpath -w "$DOTFILES_ROOT/scripts/windows-terminal-maximize.ps1")" >/dev/null 2>&1
   fi
 
   command nvim "$@"

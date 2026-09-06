@@ -21,6 +21,7 @@ readonly RIPGREP_VERSION="15.2.0"
 readonly FD_VERSION="10.5.0"
 readonly TMUX_VERSION="3.7c"
 readonly NODE_MIN_VERSION="20"
+readonly NODE_VERSION="24.18.0"
 
 readonly OH_MY_ZSH_COMMIT="4b657407c98bbc8830ae66c2ac7ff3d737c55a83"
 readonly POWERLEVEL10K_COMMIT="3308262dfbd743b6e1d3956a2b5572f7a049d692"
@@ -41,6 +42,8 @@ readonly FD_SHA256_X86_64="761c72dc8e120d85b22292063be8a796e2eeb20eb3e4f38b8fa23
 readonly FD_SHA256_AARCH64="d76c4317f7d5dba69f8a2a15856c90c777e7f0dd4e85f0de8c76de6992c374d4"
 readonly TMUX_SHA256_X86_64="cc56bd1cc873eb6089c615f0496b072385bda8a6d944069f38564a5d49c128aa"
 readonly TMUX_SHA256_AARCH64="29dcb978da2a4b0cf6790f9e004865dac239a3ba03bbf776dddacce23d03831b"
+readonly NODE_SHA256_X86_64="783130984963db7ba9cbd01089eaf2c2efb055c7c1693c943174b967b3050cb8"
+readonly NODE_SHA256_AARCH64="6b4484c2190274175df9aa8f28e2d758a819cb1c1fe6ab481e2f95b463ab8508"
 
 readonly FONT_SHA256_REGULAR="d97946186e97f8d7c0139e8983abf40a1d2d086924f2c5dbf1c29bd8f2c6e57d"
 readonly FONT_SHA256_BOLD="b6c0199cf7c7483c8343ea020658925e6de0aeb318b89908152fcb4d19226003"
@@ -48,6 +51,8 @@ readonly FONT_SHA256_ITALIC="6f357bcbe2597704e157a915625928bca38364a89c22a4ac36e
 readonly FONT_SHA256_BOLD_ITALIC="56b4131adecec052c4b324efb818dd326d586dbc316fc68f98f1cae2eb8d1220"
 
 readonly -a PACKAGES=(zsh tmux nvim)
+readonly -a SYSTEM_COMMANDS=(git zsh curl tar find sha256sum sort awk realpath make cc c++ perl unzip xz python3)
+readonly -a APT_PACKAGES=(ca-certificates curl git zsh build-essential perl unzip xz-utils python3 python3-venv)
 ARCH=""
 WORK_DIR=""
 LAST_BACKUP=""
@@ -57,6 +62,7 @@ usage() {
 Usage: ./setup.sh [command]
 
 Commands:
+  bootstrap     Install missing Debian/Ubuntu prerequisites with sudo, then install
   install       Install pinned tools and deploy the dotfiles (default)
   update        Reconcile managed tools, pinned repositories and dotfiles
   doctor        Run read-only diagnostics
@@ -65,7 +71,8 @@ Commands:
   --help        Show this help
 
 Backups are kept in ~/.config-backups/yanis-config/<timestamp>/.
-The script supports Linux/WSL on x86_64 and aarch64, without sudo or chsh.
+Supports Linux/WSL on x86_64 and aarch64. Only bootstrap uses sudo.
+Run as your normal user, not root. The login shell is not changed automatically.
 EOF
 }
 
@@ -104,6 +111,43 @@ activate_node_if_needed() {
         source "$HOME/.nvm/nvm.sh"
         set -u
     fi
+}
+
+node_is_compatible() {
+    local version
+    local major
+    command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || return 1
+    version="$(node --version 2>/dev/null)" || return 1
+    major="${version#v}"
+    major="${major%%.*}"
+    [[ "$major" =~ ^[0-9]+$ ]] && (( major >= NODE_MIN_VERSION ))
+}
+
+bootstrap() {
+    local package
+    local architecture
+    local -a missing=()
+    local -a packages=("${APT_PACKAGES[@]}")
+    architecture="$(normalize_architecture)"
+    [[ "$architecture" != aarch64 ]] || packages+=(clangd)
+    (( EUID != 0 )) || die 'run bootstrap as your normal user; it invokes sudo only for system packages.'
+    if ! command -v apt-get >/dev/null 2>&1 || ! command -v dpkg-query >/dev/null 2>&1; then
+        die 'bootstrap supports Debian/Ubuntu; on other distributions install the prerequisites in README.md, then run install.'
+    fi
+    for package in "${packages[@]}"; do
+        if [[ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)" != installed ]]; then
+            missing+=("$package")
+        fi
+    done
+    if (( ${#missing[@]} > 0 )); then
+        require_command sudo
+        info "Installing system prerequisites: ${missing[*]}"
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends "${missing[@]}"
+    else
+        ok 'system prerequisites are already installed'
+    fi
+    install_all
 }
 
 is_wsl() {
@@ -182,27 +226,23 @@ backup_unmanaged_binary() {
 }
 
 preflight() {
-    local node_major
     local package
+    local -a missing=()
+    local -a commands=("${SYSTEM_COMMANDS[@]}")
     ARCH="$(normalize_architecture)"
+    [[ "$ARCH" != aarch64 ]] || commands+=(clangd)
     for package in "${PACKAGES[@]}"; do
         [[ -d "$DOTFILES/$package" ]] || die "missing Stow package: ${package}."
     done
-    for package in git zsh tar find sha256sum sort awk realpath; do
-        require_command "$package"
+    for package in "${commands[@]}"; do
+        command -v "$package" >/dev/null 2>&1 || missing+=("$package")
     done
-    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-        die 'curl or wget is required.'
+    if (( ${#missing[@]} > 0 )); then
+        die "missing prerequisites: ${missing[*]}. On Debian/Ubuntu run './setup.sh bootstrap' as your normal user; see README.md for other systems."
     fi
     activate_node_if_needed
-    require_command node
-    node_major="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
-    [[ "$node_major" =~ ^[0-9]+$ ]] || die 'could not determine the Node.js version.'
-    (( node_major >= NODE_MIN_VERSION )) ||
-        die "Node.js ${NODE_MIN_VERSION}+ is required for Mason (found $(node --version))."
-    if ! command -v stow >/dev/null 2>&1; then
-        require_command make
-        require_command perl
+    if ! node_is_compatible; then
+        info "Node.js ${NODE_MIN_VERSION}+ and npm are missing or outdated; install will add Node.js ${NODE_VERSION} in ~/.local."
     fi
     report_deployment_conflicts
 }
@@ -263,8 +303,43 @@ binary_sha256() {
         fd:aarch64) printf '%s\n' "$FD_SHA256_AARCH64" ;;
         tmux:x86_64) printf '%s\n' "$TMUX_SHA256_X86_64" ;;
         tmux:aarch64) printf '%s\n' "$TMUX_SHA256_AARCH64" ;;
+        node:x86_64) printf '%s\n' "$NODE_SHA256_X86_64" ;;
+        node:aarch64) printf '%s\n' "$NODE_SHA256_AARCH64" ;;
         *) die "no checksum for $1 on $ARCH." ;;
     esac
+}
+
+install_node() {
+    local temporary
+    local node_arch
+    local install_directory
+    local executable
+    if node_is_compatible; then
+        ok "Node.js $(node --version) and npm (existing runtime kept)"
+        return
+    fi
+    node_arch=x64
+    [[ "$ARCH" != aarch64 ]] || node_arch=arm64
+    info "Installing Node.js ${NODE_VERSION} for ${node_arch}..."
+    temporary="$(new_temp_dir)"
+    download_verified \
+        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz" \
+        "$(binary_sha256 node)" "$temporary/node.tar.gz"
+    tar -xzf "$temporary/node.tar.gz" -C "$temporary"
+    install_directory="${LOCAL_OPT}/node-${NODE_VERSION}"
+    if [[ -d "$install_directory" ]]; then
+        find "$install_directory" -depth -delete
+    fi
+    mv "$temporary/node-v${NODE_VERSION}-linux-${node_arch}" "$install_directory"
+    for executable in node npm npx; do
+        backup_unmanaged_binary "$LOCAL_BIN/$executable" node
+        ln -sfn "$install_directory/bin/$executable" "$LOCAL_BIN/$executable"
+    done
+    record_managed node "$NODE_VERSION"
+    export PATH="$LOCAL_BIN:$PATH"
+    hash -r
+    node_is_compatible || die 'the installed Node.js runtime could not be started.'
+    ok "Node.js ${NODE_VERSION} installed"
 }
 
 install_stow() {
@@ -482,6 +557,10 @@ install_fonts() {
     local font_directory
     local temporary
     local windows_script
+    if [[ -n "${SSH_CONNECTION:-}${SSH_TTY:-}" ]]; then
+        info 'SSH session: select MesloLGS NF in the terminal on your client; no server fonts are needed.'
+        return
+    fi
     if is_wsl && command -v powershell.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
         windows_script="$(wslpath -w "$DOTFILES/scripts/install-meslolgs-fonts.ps1")"
         if powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
@@ -751,17 +830,19 @@ doctor() {
     local source
     local package
     local relative
+    local -a commands=("${SYSTEM_COMMANDS[@]}" node npm)
     if [[ "$(uname -s)" == Linux ]] && normalize_architecture >/dev/null 2>&1; then
         doctor_item platform OK "Linux/$(normalize_architecture)"
+        [[ "$(normalize_architecture)" != aarch64 ]] || commands+=(clangd)
     else
         doctor_item platform FAIL 'Linux x86_64 or aarch64 is required'
         (( failures += 1 ))
     fi
-    for target in git zsh tar sha256sum node; do
+    for target in "${commands[@]}"; do
         if command -v "$target" >/dev/null 2>&1; then
             doctor_item "$target" OK "$(command -v "$target")"
         else
-            doctor_item "$target" FAIL 'missing'
+            doctor_item "$target" FAIL 'missing; run ./setup.sh bootstrap on Debian/Ubuntu'
             (( failures += 1 ))
         fi
     done
@@ -799,8 +880,7 @@ doctor() {
     if command -v codex >/dev/null 2>&1; then
         doctor_item Codex OK "$(codex --version 2>/dev/null | head -n 1)"
     else
-        doctor_item Codex WARN 'not installed; see https://developers.openai.com/codex/cli/'
-        (( warnings += 1 ))
+        doctor_item Codex INFO 'optional; not installed'
     fi
     for package in "${PACKAGES[@]}"; do
         while IFS= read -r -d '' source; do
@@ -824,8 +904,8 @@ install_all() {
     local fd_current=""
     local tmux_current=""
     local zsh_custom
+    (( EUID != 0 )) || die 'run install as your normal user, not root.'
     preflight
-    export PATH="$LOCAL_BIN:$PATH"
     WORK_DIR="$(mktemp -d)"
     mkdir -p "$LOCAL_BIN" "$LOCAL_OPT" "$STATE_DIR"
     if [[ "${DOTFILES_TEST_MODE:-0}" == 1 ]]; then
@@ -833,6 +913,7 @@ install_all() {
         deploy_dotfiles
         return
     fi
+    install_node
     install_stow
     install_neovim
     command -v zoxide >/dev/null 2>&1 && zoxide_current="$(zoxide --version | awk '{print $2}')"
@@ -864,7 +945,13 @@ install_all() {
     printf 'Health check: %s doctor\n' "$0"
 }
 
+export PATH="$LOCAL_BIN:$PATH"
+
 case "$COMMAND" in
+    bootstrap)
+        (( $# <= 1 )) || die 'bootstrap takes no argument.'
+        bootstrap
+        ;;
     install)
         (( $# <= 1 )) || die 'install takes no argument.'
         install_all
@@ -875,6 +962,7 @@ case "$COMMAND" in
         ;;
     doctor)
         (( $# <= 1 )) || die 'doctor takes no argument.'
+        activate_node_if_needed
         doctor
         ;;
     reset)
