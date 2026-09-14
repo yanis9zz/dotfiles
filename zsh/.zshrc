@@ -21,14 +21,37 @@ ccw() {
     local target=.
     local norminette_status
     local compile_status
+    local file
+    local -a files
     if [[ -d "$target/libft" && ! -f "$target/libft.h" ]]; then
         target="$target/libft"
     fi
+    if (( $# > 0 )); then
+        if [[ "$target" == "./libft" ]]; then
+            for file in "$@"; do
+                case "$file" in
+                    libft/*) files+=("${file#libft/}") ;;
+                    ./libft/*) files+=("${file#./libft/}") ;;
+                    *) files+=("$file") ;;
+                esac
+            done
+        else
+            files=("$@")
+        fi
+    fi
     (
         cd "$target" || exit 1
-        norminette .
+        if (( $# > 0 )); then
+            norminette "${files[@]}"
+        else
+            norminette .
+        fi
         norminette_status=$?
-        cc -Wall -Wextra -Werror -c ./*.c
+        if (( $# > 0 )); then
+            cc -Wall -Wextra -Werror -c "${files[@]}"
+        else
+            cc -Wall -Wextra -Werror -c ./*.c
+        fi
         compile_status=$?
         (( norminette_status == 0 && compile_status == 0 ))
     )
