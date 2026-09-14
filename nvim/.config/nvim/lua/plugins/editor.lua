@@ -1,5 +1,11 @@
 return {
-  { 'NMAC427/guess-indent.nvim', event = { 'BufReadPre', 'BufNewFile' }, opts = {} },
+  {
+    'NMAC427/guess-indent.nvim',
+    event = { 'BufReadPre', 'BufNewFile' },
+    opts = {
+      filetype_exclude = { 'c', 'cpp', 'netrw', 'tutor' },
+    },
+  },
 
   {
     'folke/which-key.nvim',
