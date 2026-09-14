@@ -17,6 +17,23 @@ fi
 alias ls='ls --color=auto'
 alias t='tmux new-session -A -s main'
 
+ccw() {
+    local target=.
+    local norminette_status
+    local compile_status
+    if [[ -d "$target/libft" && ! -f "$target/libft.h" ]]; then
+        target="$target/libft"
+    fi
+    (
+        cd "$target" || exit 1
+        norminette .
+        norminette_status=$?
+        cc -Wall -Wextra -Werror -c ./*.c
+        compile_status=$?
+        (( norminette_status == 0 && compile_status == 0 ))
+    )
+}
+
 # Machine-specific aliases, secrets and optional runtimes belong here.
 _dotfiles_load_nvm() { return 0; }
 [[ ! -r "$HOME/.zshrc.local" ]] || source "$HOME/.zshrc.local"

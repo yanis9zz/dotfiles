@@ -22,6 +22,7 @@ readonly FD_VERSION="10.5.0"
 readonly TMUX_VERSION="3.7c"
 readonly NODE_MIN_VERSION="20"
 readonly NODE_VERSION="24.18.0"
+readonly NORMINETTE_VERSION="3.3.60"
 
 readonly OH_MY_ZSH_COMMIT="4b657407c98bbc8830ae66c2ac7ff3d737c55a83"
 readonly POWERLEVEL10K_COMMIT="3308262dfbd743b6e1d3956a2b5572f7a049d692"
@@ -382,6 +383,30 @@ install_stow() {
     record_managed stow "$STOW_VERSION"
     hash -r
     ok "GNU Stow ${STOW_VERSION} installed"
+}
+
+install_norminette() {
+    local current=""
+    local environment="${LOCAL_OPT}/norminette"
+    local executable="${environment}/bin/norminette"
+    local requirements="${DOTFILES}/tools/norminette/requirements.txt"
+    if [[ -x "$executable" ]]; then
+        current=$("$executable" --version | cut -d" " -f2)
+    fi
+    if [[ "$current" != "$NORMINETTE_VERSION" ]]; then
+        info "Installing Norminette ${NORMINETTE_VERSION}..."
+        if [[ ! -x "${environment}/bin/python" ]]; then
+            python3 -m venv "$environment"
+        fi
+        "$environment/bin/python" -m pip install --disable-pip-version-check \
+            --upgrade --requirement "$requirements"
+    fi
+    mkdir -p "$LOCAL_BIN"
+    backup_unmanaged_binary "$LOCAL_BIN/norminette" norminette
+    ln -sfn "$executable" "$LOCAL_BIN/norminette"
+    record_managed norminette "$NORMINETTE_VERSION"
+    hash -r
+    ok "Norminette ${NORMINETTE_VERSION} installed"
 }
 
 archive_url() {
@@ -869,7 +894,7 @@ doctor() {
         doctor_item Neovim FAIL 'missing; install will add 0.12.5'
         (( failures += 1 ))
     fi
-    for target in stow zoxide fzf atuin rg fd tmux; do
+    for target in norminette stow zoxide fzf atuin rg fd tmux; do
         if command -v "$target" >/dev/null 2>&1; then
             doctor_item "$target" OK "$(command -v "$target")"
         else
@@ -915,6 +940,7 @@ install_all() {
     fi
     install_node
     install_stow
+    install_norminette
     install_neovim
     command -v zoxide >/dev/null 2>&1 && zoxide_current="$(zoxide --version | awk '{print $2}')"
     command -v fzf >/dev/null 2>&1 && fzf_current="$(fzf --version | awk '{print $1}')"
