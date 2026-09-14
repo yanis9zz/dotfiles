@@ -34,9 +34,9 @@ vim.o.scrolloff = 10
 vim.o.sidescrolloff = 8
 vim.o.confirm = true
 
-vim.schedule(function()
-  vim.o.clipboard = 'unnamedplus'
-end)
+-- Use the terminal clipboard when no native clipboard command is available.
+vim.g.clipboard = 'osc52'
+vim.o.clipboard = 'unnamedplus'
 
 vim.api.nvim_create_autocmd('TextYankPost', {
   desc = 'Highlight yanked text',
