@@ -36,10 +36,10 @@ grep -Fq './setup.sh bootstrap' "$TEST_ROOT/preflight.log"
 grep -Fqx 'original zsh' "$TEST_HOME/.zshrc"
 
 if HOME="$TEST_HOME" PATH="$TEST_ROOT/minimal-bin" "$REPOSITORY/setup.sh" bootstrap >"$TEST_ROOT/bootstrap.log" 2>&1; then
-    printf 'bootstrap unexpectedly accepted a system without apt\n' >&2
+    printf 'bootstrap unexpectedly accepted a system without a package manager\n' >&2
     exit 1
 fi
-grep -Fq 'bootstrap supports Debian/Ubuntu' "$TEST_ROOT/bootstrap.log"
+grep -Fq 'bootstrap supports apt, dnf, pacman, zypper and apk' "$TEST_ROOT/bootstrap.log"
 
 HOME="$TEST_HOME" DOTFILES_TEST_MODE=1 "$REPOSITORY/setup.sh" install
 

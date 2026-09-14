@@ -1,12 +1,10 @@
 # Dotfiles
 
-Zsh, Neovim and tmux for Ubuntu/Debian and WSL. Supports x86_64 and ARM64.
+Zsh, Neovim and tmux configuration for Linux.
 
 ## Install
 
 ```sh
-sudo apt-get update
-sudo apt-get install --yes git ca-certificates
 git clone https://github.com/yanis9zz/config.git ~/dotfiles
 cd ~/dotfiles
 ./setup.sh bootstrap

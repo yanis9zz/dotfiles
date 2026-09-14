@@ -53,7 +53,11 @@ readonly FONT_SHA256_BOLD_ITALIC="56b4131adecec052c4b324efb818dd326d586dbc316fc6
 
 readonly -a PACKAGES=(zsh tmux nvim)
 readonly -a SYSTEM_COMMANDS=(git zsh curl tar find sha256sum sort awk realpath make cc c++ perl unzip xz python3)
-readonly -a APT_PACKAGES=(ca-certificates curl git zsh build-essential perl unzip xz-utils python3 python3-venv)
+readonly -a APT_PACKAGES=(bash ca-certificates coreutils curl findutils g++ gcc git gawk make perl python3 python3-venv tar unzip xz-utils zsh)
+readonly -a DNF_PACKAGES=(bash ca-certificates coreutils curl findutils gcc gcc-c++ git gawk make perl python3 python3-pip tar unzip xz zsh)
+readonly -a PACMAN_PACKAGES=(bash ca-certificates coreutils curl findutils gcc git gawk make perl python python-pip tar unzip xz zsh)
+readonly -a ZYPPER_PACKAGES=(bash ca-certificates coreutils curl findutils gcc gcc-c++ git gawk make perl python3 python3-pip tar unzip xz zsh)
+readonly -a APK_PACKAGES=(bash build-base ca-certificates coreutils curl findutils git gawk make perl py3-pip python3 tar unzip xz zsh)
 ARCH=""
 WORK_DIR=""
 LAST_BACKUP=""
@@ -63,7 +67,7 @@ usage() {
 Usage: ./setup.sh [command]
 
 Commands:
-  bootstrap     Install missing Debian/Ubuntu prerequisites with sudo, then install
+  bootstrap     Install missing system prerequisites with sudo, then install
   install       Install pinned tools and deploy the dotfiles (default)
   update        Reconcile managed tools, pinned repositories and dotfiles
   doctor        Run read-only diagnostics
@@ -72,7 +76,8 @@ Commands:
   --help        Show this help
 
 Backups are kept in ~/.config-backups/yanis-config/<timestamp>/.
-Supports Linux/WSL on x86_64 and aarch64. Only bootstrap uses sudo.
+Supports Linux/WSL on x86_64 and aarch64. bootstrap detects apt, dnf, pacman,
+zypper or apk. Only bootstrap uses sudo.
 Run as your normal user, not root. The login shell is not changed automatically.
 EOF
 }
@@ -124,30 +129,111 @@ node_is_compatible() {
     [[ "$major" =~ ^[0-9]+$ ]] && (( major >= NODE_MIN_VERSION ))
 }
 
-bootstrap() {
+detect_package_manager() {
+    if command -v apt-get >/dev/null 2>&1 && command -v dpkg-query >/dev/null 2>&1; then
+        printf 'apt\n'
+    elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then
+        command -v rpm >/dev/null 2>&1 || die 'dnf was found, but rpm is missing.'
+        printf 'dnf\n'
+    elif command -v pacman >/dev/null 2>&1; then
+        printf 'pacman\n'
+    elif command -v zypper >/dev/null 2>&1; then
+        command -v rpm >/dev/null 2>&1 || die 'zypper was found, but rpm is missing.'
+        printf 'zypper\n'
+    elif command -v apk >/dev/null 2>&1; then
+        printf 'apk\n'
+    else
+        die 'no supported package manager found; bootstrap supports apt, dnf, pacman, zypper and apk.'
+    fi
+}
+
+package_is_installed() {
+    local manager="$1"
+    local package="$2"
+    case "$manager" in
+        apt) [[ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)" == installed ]] ;;
+        dnf|zypper) rpm -q "$package" >/dev/null 2>&1 ;;
+        pacman) pacman -Qq "$package" >/dev/null 2>&1 ;;
+        apk) apk info -e "$package" >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+
+install_system_prerequisites() {
+    local manager="$1"
     local package
-    local architecture
+    local dnf_command
+    local -a packages=()
     local -a missing=()
-    local -a packages=("${APT_PACKAGES[@]}")
-    architecture="$(normalize_architecture)"
-    [[ "$architecture" != aarch64 ]] || packages+=(clangd)
-    (( EUID != 0 )) || die 'run bootstrap as your normal user; it invokes sudo only for system packages.'
-    if ! command -v apt-get >/dev/null 2>&1 || ! command -v dpkg-query >/dev/null 2>&1; then
-        die 'bootstrap supports Debian/Ubuntu; on other distributions install the prerequisites in README.md, then run install.'
+    case "$manager" in
+        apt)
+            packages=("${APT_PACKAGES[@]}")
+            ;;
+        dnf)
+            packages=("${DNF_PACKAGES[@]}")
+            ;;
+        pacman)
+            packages=("${PACMAN_PACKAGES[@]}")
+            ;;
+        zypper)
+            packages=("${ZYPPER_PACKAGES[@]}")
+            ;;
+        apk)
+            packages=("${APK_PACKAGES[@]}")
+            ;;
+        *)
+            die "unsupported package manager: ${manager}."
+            ;;
+    esac
+    if [[ "$ARCH" == aarch64 ]]; then
+        case "$manager" in
+            apt) packages+=(clangd) ;;
+            dnf) packages+=(clang-tools-extra) ;;
+            pacman) packages+=(clang) ;;
+            zypper) packages+=(clang-tools) ;;
+            apk) packages+=(clang-extra-tools) ;;
+        esac
     fi
     for package in "${packages[@]}"; do
-        if [[ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)" != installed ]]; then
-            missing+=("$package")
-        fi
+        package_is_installed "$manager" "$package" || missing+=("$package")
     done
-    if (( ${#missing[@]} > 0 )); then
-        require_command sudo
-        info "Installing system prerequisites: ${missing[*]}"
-        sudo apt-get update
-        sudo apt-get install --yes --no-install-recommends "${missing[@]}"
-    else
-        ok 'system prerequisites are already installed'
+    if (( ${#missing[@]} == 0 )); then
+        ok "system prerequisites are already installed (${manager})"
+        return
     fi
+    require_command sudo
+    info "Installing system prerequisites with ${manager}: ${missing[*]}"
+    case "$manager" in
+        apt)
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends "${missing[@]}"
+            ;;
+        dnf)
+            if command -v dnf >/dev/null 2>&1; then
+                dnf_command=dnf
+            else
+                dnf_command=dnf5
+            fi
+            sudo "$dnf_command" install --assumeyes "${missing[@]}"
+            ;;
+        pacman)
+            sudo pacman --noconfirm --needed -S "${missing[@]}"
+            ;;
+        zypper)
+            sudo zypper --non-interactive install --no-recommends "${missing[@]}"
+            ;;
+        apk)
+            sudo apk add --no-cache "${missing[@]}"
+            ;;
+    esac
+}
+
+bootstrap() {
+    local manager
+    ARCH="$(normalize_architecture)"
+    manager="$(detect_package_manager)"
+    (( EUID != 0 )) || die 'run bootstrap as your normal user; it invokes sudo only for system packages.'
+    install_system_prerequisites "$manager"
     install_all
 }
 
@@ -239,7 +325,7 @@ preflight() {
         command -v "$package" >/dev/null 2>&1 || missing+=("$package")
     done
     if (( ${#missing[@]} > 0 )); then
-        die "missing prerequisites: ${missing[*]}. On Debian/Ubuntu run './setup.sh bootstrap' as your normal user; see README.md for other systems."
+        die "missing prerequisites: ${missing[*]}. Run './setup.sh bootstrap' as your normal user, or install them with your distribution's package manager."
     fi
     activate_node_if_needed
     if ! node_is_compatible; then
@@ -867,7 +953,7 @@ doctor() {
         if command -v "$target" >/dev/null 2>&1; then
             doctor_item "$target" OK "$(command -v "$target")"
         else
-            doctor_item "$target" FAIL 'missing; run ./setup.sh bootstrap on Debian/Ubuntu'
+            doctor_item "$target" FAIL 'missing; run ./setup.sh bootstrap or install it with your package manager'
             (( failures += 1 ))
         fi
     done
