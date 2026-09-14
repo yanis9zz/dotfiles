@@ -21,16 +21,19 @@ alias t='tmux new-session -A -s main'
 _dotfiles_load_nvm() { return 0; }
 [[ ! -r "$HOME/.zshrc.local" ]] || source "$HOME/.zshrc.local"
 
-# This wrapper ensures Node is available to Neovim/Mason. Terminal maximization is opt-in.
+# Only initialize NVM when the executables needed by Mason are missing.
 nvim() {
-  _dotfiles_load_nvm
+  if (( ! $+commands[node] || ! $+commands[npm] )); then
+    _dotfiles_load_nvm
+  fi
 
   if [[ "${DOTFILES_MAXIMIZE_WINDOWS_TERMINAL:-0}" == 1 &&
+        -t 0 && -t 1 && -z "${NVIM:-}" &&
         -n "${WT_SESSION:-}" &&
         -x "$(command -v powershell.exe 2>/dev/null)" &&
         -r "$DOTFILES_ROOT/scripts/windows-terminal-maximize.ps1" ]]; then
     powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-      -File "$(wslpath -w "$DOTFILES_ROOT/scripts/windows-terminal-maximize.ps1")" >/dev/null 2>&1
+      -File "$(wslpath -w "$DOTFILES_ROOT/scripts/windows-terminal-maximize.ps1")" >/dev/null 2>&1 &!
   fi
 
   command nvim "$@"

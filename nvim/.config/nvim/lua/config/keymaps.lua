@@ -19,20 +19,112 @@ map('n', '<C-S-l>', '<C-w>L', { desc = 'Move window right' })
 map('n', '<C-S-j>', '<C-w>J', { desc = 'Move window down' })
 map('n', '<C-S-k>', '<C-w>K', { desc = 'Move window up' })
 
-map('n', '<leader>ol', function()
-  vim.cmd 'only'
+local terminal_buf = nil
+local terminal_win = nil
+local terminal_editor_win = nil
+local terminal_return_win = nil
+
+local function current_tab_window(window)
+  return window and vim.api.nvim_win_is_valid(window) and vim.api.nvim_win_get_tabpage(window) == vim.api.nvim_get_current_tabpage()
+end
+
+local function find_terminal_window()
+  for _, window in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.api.nvim_win_get_buf(window) == terminal_buf then
+      return window
+    end
+  end
+end
+
+local function hide_terminal_split()
+  terminal_win = find_terminal_window()
+  if terminal_win then
+    vim.cmd 'stopinsert'
+    if vim.api.nvim_get_current_win() == terminal_win and current_tab_window(terminal_return_win) and terminal_return_win ~= terminal_win then
+      vim.api.nvim_set_current_win(terminal_return_win)
+    end
+    if vim.fn.winlayout()[1] == 'leaf' then
+      vim.cmd 'enew'
+    else
+      vim.api.nvim_win_hide(terminal_win)
+    end
+  end
+
+  terminal_win = nil
+end
+
+local function open_terminal_split(start_insert)
+  terminal_return_win = vim.api.nvim_get_current_win()
+  -- Keep the terminal above its editor when toggling from another split.
+  if current_tab_window(terminal_editor_win) then
+    vim.api.nvim_set_current_win(terminal_editor_win)
+  else
+    terminal_editor_win = vim.api.nvim_get_current_win()
+  end
+  local height = vim.api.nvim_win_get_height(0)
+  local terminal_height = math.max(5, math.floor(height / 4))
+
+  -- Open above the current window
+  vim.cmd 'aboveleft split'
+  terminal_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_height(terminal_win, terminal_height)
+
+  local job = terminal_buf and vim.api.nvim_buf_is_valid(terminal_buf) and vim.b[terminal_buf].terminal_job_id
+  -- A valid buffer can still belong to a shell that has exited.
+  if job and vim.fn.jobwait({ job }, 0)[1] == -1 then
+    vim.api.nvim_win_set_buf(terminal_win, terminal_buf)
+  else
+    vim.cmd 'terminal'
+    terminal_buf = vim.api.nvim_get_current_buf()
+
+    -- Keep the terminal alive when its window is closed
+    vim.bo[terminal_buf].bufhidden = 'hide'
+  end
+
+  if start_insert then
+    vim.cmd 'startinsert'
+  end
+end
+
+local function toggle_terminal_split()
+  if find_terminal_window() then
+    hide_terminal_split()
+  else
+    open_terminal_split(true)
+  end
+end
+
+-- Accept both releasing Ctrl after W and keeping it held for T.
+for _, keys in ipairs { '<C-w>t', '<C-w><C-t>' } do
+  map({ 'n', 't' }, keys, toggle_terminal_split, {
+    desc = 'Toggle terminal split',
+  })
+end
+
+local function layout_left_and_right_with_terminal_top()
+  vim.cmd 'stopinsert'
+  -- Preserve the terminal before rebuilding the layout
+  hide_terminal_split()
+
+  if vim.bo.buftype == 'terminal' then
+    vim.cmd 'enew'
+  end
+  vim.cmd 'silent only'
+  local left_editor = vim.api.nvim_get_current_win()
   vim.cmd 'vsplit'
-  vim.cmd 'wincmd l'
-  vim.cmd 'split'
-  vim.cmd 'wincmd k'
-  vim.cmd 'resize 12'
-  vim.cmd 'terminal'
-  vim.wo.winfixheight = true
-  vim.wo.winfixwidth = true
-  vim.cmd 'wincmd j'
-  vim.wo.winfixwidth = true
-  vim.cmd 'wincmd h'
-end, { desc = '[O]pen [L]ayout (term top right)' })
+  terminal_editor_win = vim.api.nvim_get_current_win()
+
+  -- Reuse the same terminal in the top-right quarter
+  open_terminal_split(false)
+
+  -- Return focus to the left editor
+  terminal_return_win = left_editor
+  vim.api.nvim_set_current_win(left_editor)
+end
+
+map({ 'n', 't' }, '<leader>ol', layout_left_and_right_with_terminal_top, {
+  desc = '[O]pen [L]ayout (term top right)',
+})
 
 local open_codex = function()
   require('config.codex').open()
