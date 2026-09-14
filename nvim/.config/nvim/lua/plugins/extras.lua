@@ -98,7 +98,7 @@ return {
     '42Paris/42header',
     cmd = 'Stdheader',
     keys = {
-      { '<leader>H', '<cmd>Stdheader<cr>', desc = '42 [H]eader' },
+      { '<leader>h', '<cmd>Stdheader<cr>', desc = '42 [h]eader' },
     },
   },
   {
